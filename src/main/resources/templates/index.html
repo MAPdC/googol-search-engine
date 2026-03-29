@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>Googol - Indexar novo URL</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Arial, sans-serif;
+        }
+
+        body {
+            background-color: #f9f9f9;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            padding: 40px 20px;
+            color: #333;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 1.5rem;
+            background: linear-gradient(45deg, #4285F4, #34A853, #FBBC05, #EA4335);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            font-weight: 700;
+            letter-spacing: -1px;
+            text-align: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 700px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .card {
+            background: white;
+            width: 100%;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+            margin-bottom: 25px;
+        }
+
+        form {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 16px 20px;
+            border: 1px solid #dfe1e5;
+            border-radius: 24px;
+            font-size: 1rem;
+            outline: none;
+            box-shadow: 0 1px 6px rgba(32, 33, 36, 0.08);
+            transition: all 0.2s ease;
+        }
+
+        input[type="text"]:hover {
+            box-shadow: 0 1px 8px rgba(32, 33, 36, 0.15);
+        }
+
+        input[type="text"]:focus {
+            box-shadow: 0 1px 10px rgba(32, 33, 36, 0.2);
+        }
+
+        button {
+            background: #4285F4;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 24px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            align-self: center;
+            transition: background 0.2s ease;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background: #357ae8;
+        }
+
+        p {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 8px;
+            width: 100%;
+            text-align: center;
+        }
+
+        p.success {
+            background-color: #e6f4ea;
+            color: #137333;
+            border: 1px solid #d2ebd1;
+        }
+
+        p.error {
+            background-color: #fce8e6;
+            color: #c5221f;
+            border: 1px solid #fad2cf;
+        }
+
+        .back-link {
+            margin-top: 10px;
+            color: #4285F4;
+            text-decoration: none;
+            font-size: 1rem;
+            font-weight: 500;
+            padding: 8px 16px;
+            border-radius: 18px;
+            transition: background 0.2s ease;
+        }
+
+        .back-link:hover {
+            background-color: #e8f0fe;
+            text-decoration: underline;
+        }
+
+        .logo-dot {
+            color: #EA4335;
+            font-weight: bold;
+        }
+
+        .header-logo {
+            margin-bottom: 30px;
+            font-size: 3rem;
+            font-weight: 700;
+            background: linear-gradient(45deg, #4285F4, #34A853, #FBBC05, #EA4335);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+
+        @media (max-width: 640px) {
+            h1 {
+                font-size: 2rem;
+            }
+
+            .card {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header-logo">Googo<span class="logo-dot">l</span></div>
+
+    <div class="card">
+        <h1>Indexar novo URL</h1>
+
+        <form th:action="@{/submit}" method="get">
+            <input type="text" name="url" placeholder="https://exemplo.com" required/>
+            <button type="submit">Enviar</button>
+        </form>
+
+        <p th:if="${message != null}" th:text="${message}" th:class="${message.contains('sucesso') ? 'success' : 'error'}"></p>
+    </div>
+
+    <a href="/" class="back-link">Voltar à pesquisa</a>
+</div>
+</body>
+</html>
