@@ -1,7 +1,10 @@
 # Maven
+HELP.md
 target/
 .mvn/timing.properties
 .mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
 mvnw.cmd
 mvnw
 
