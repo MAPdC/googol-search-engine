@@ -1,6 +1,12 @@
-# Maven
-HELP.md
+# Maven build output
 target/
+
+# Runtime-generated Barrel snapshots
+# Binary serialised index files — machine-specific, auto-regenerated
+# Never commit these, they can be large and contain crawled data
+barrel-snapshots/
+
+# Maven
 .mvn/wrapper/maven-wrapper.properties
 !**/src/main/**/target/
 !**/src/test/**/target/
@@ -17,10 +23,17 @@ build/
 !**/src/main/**/build/
 !**/src/test/**/build/
 
-# IDEs
+# IntelliJ IDEA
 .idea/
-.vscode/
 *.iml
+*.iws
+*.ipr
+out/
+
+# VS Code
+.vscode/
+
+# Eclipse
 .settings/
 .classpath
 .project
@@ -28,8 +41,13 @@ build/
 # Compiled class file
 *.class
 
-# Log file
+# Logs
 *.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
 
 # Package Files #
 *.jar
@@ -39,3 +57,7 @@ build/
 *.zip
 *.tar.gz
 *.rar
+
+# Sensitive config (never commit real API keys)
+# Keep application.properties in version control but make sure
+# ai.api.key= is left blank — use the GROQ_API_KEY env variable instead
