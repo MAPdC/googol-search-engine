@@ -1,17 +1,13 @@
-# Maven build output
+# Maven
 target/
+.mvn/wrapper/maven-wrapper.properties
+!**/src/main/**/target/
+!**/src/test/**/target/
 
 # Runtime-generated Barrel snapshots
 # Binary serialised index files — machine-specific, auto-regenerated
 # Never commit these, they can be large and contain crawled data
 barrel-snapshots/
-
-# Maven
-.mvn/wrapper/maven-wrapper.properties
-!**/src/main/**/target/
-!**/src/test/**/target/
-mvnw.cmd
-mvnw
 
 # NetBeans
 /nbproject/private/
