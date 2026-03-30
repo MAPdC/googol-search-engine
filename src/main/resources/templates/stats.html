@@ -1,185 +1,596 @@
 <!DOCTYPE html>
-<html xmlns:th="http://www.thymeleaf.org">
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
 <head>
-    <title>Googol - Estatísticas</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Googol — Live System Stats</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- SockJS + STOMP for WebSocket real-time updates -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.6.1/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Segoe UI', Arial, sans-serif;
+        :root {
+            --bg:      #0a0a0f;
+            --surface: #111118;
+            --surface2:#16161f;
+            --border:  #1e1e2e;
+            --accent:  #6c63ff;
+            --accent2: #ff6584;
+            --accent3: #43e97b;
+            --text:    #e8e8f0;
+            --muted:   #6b6b80;
+            --radius:  12px;
         }
+
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-            background-color: #f9f9f9;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'DM Sans', sans-serif;
             min-height: 100vh;
-            padding: 40px 20px;
-            color: #333;
         }
 
-        .container {
-            width: 100%;
-            max-width: 800px;
+        /* ── Header ──────────────────────────────────────────── */
+        header {
+            position: sticky;
+            top: 0; z-index: 100;
+            background: rgba(10,10,15,.88);
+            backdrop-filter: blur(14px);
+            border-bottom: 1px solid var(--border);
+            padding: .85rem 2rem;
             display: flex;
-            flex-direction: column;
             align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
         }
 
-        .header-logo {
-            margin-bottom: 30px;
-            font-size: 3rem;
-            font-weight: 700;
-            background: linear-gradient(45deg, #4285F4, #34A853, #FBBC05, #EA4335);
+        .logo {
+            font-family: 'Syne', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 800;
+            letter-spacing: -.04em;
+            background: linear-gradient(135deg, #6c63ff, #ff6584, #43e97b);
             -webkit-background-clip: text;
             background-clip: text;
             color: transparent;
+            text-decoration: none;
         }
 
-        .logo-dot {
-            color: #EA4335;
-            font-weight: bold;
-        }
-
-        .card {
-            background: white;
-            width: 100%;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
-            margin-bottom: 25px;
-        }
-
-        h2 {
-            font-size: 1.8rem;
-            margin-bottom: 1.2rem;
-            color: #1a73e8;
-            border-bottom: 2px solid #f1f3f4;
-            padding-bottom: 10px;
-            width: 100%;
-        }
-
-        h3 {
-            font-size: 1.4rem;
-            margin: 1.5rem 0 1rem 0;
-            color: #1a73e8;
-            width: 100%;
-        }
-
-        ul {
-            list-style-type: none;
-            width: 100%;
-            margin-bottom: 20px;
-        }
-
-        li {
-            padding: 12px 0;
-            border-bottom: 1px solid #f1f3f4;
+        .header-right {
             display: flex;
-            justify-content: space-between;
             align-items: center;
+            gap: 1rem;
         }
 
-        li:last-child {
-            border-bottom: none;
-        }
-
-        .stats-item {
+        /* Live indicator dot */
+        .live-badge {
             display: flex;
-            justify-content: space-between;
-            width: 100%;
-        }
-
-        .stats-label {
-            font-weight: 600;
-            color: #5f6368;
-        }
-
-        .stats-value {
-            color: #202124;
+            align-items: center;
+            gap: .45rem;
+            font-size: .78rem;
             font-weight: 500;
+            letter-spacing: .06em;
+            text-transform: uppercase;
+            color: var(--muted);
+            padding: .3rem .8rem;
+            border: 1px solid var(--border);
+            border-radius: 999px;
         }
 
-        .search-term {
-            font-weight: 500;
-            color: #202124;
+        .live-dot {
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            background: var(--muted);
+            transition: background .4s;
         }
 
-        .search-count {
-            background-color: #e8f0fe;
-            color: #1a73e8;
-            border-radius: 16px;
-            padding: 4px 12px;
-            font-size: 0.9rem;
-            font-weight: 500;
+        .live-badge.connected .live-dot {
+            background: var(--accent3);
+            animation: pulse 2s infinite;
+        }
+
+        .live-badge.connected { color: var(--accent3); border-color: rgba(67,233,123,.3); }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: .4; }
         }
 
         .back-link {
-            margin-top: 10px;
-            color: #4285F4;
+            color: var(--muted);
             text-decoration: none;
-            font-size: 1rem;
+            font-size: .88rem;
+            transition: color .2s;
+        }
+
+        .back-link:hover { color: var(--text); }
+
+        /* ── Main ────────────────────────────────────────────── */
+        main {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem 4rem;
+        }
+
+        h1 {
+            font-family: 'Syne', sans-serif;
+            font-size: 1.7rem;
+            font-weight: 700;
+            margin-bottom: .35rem;
+        }
+
+        .page-subtitle {
+            font-size: .88rem;
+            color: var(--muted);
+            font-weight: 300;
+            margin-bottom: 2rem;
+        }
+
+        /* ── Overview grid ───────────────────────────────────── */
+        .overview-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2.5rem;
+        }
+
+        .stat-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.2rem 1.4rem;
+            transition: border-color .2s;
+        }
+
+        .stat-card:hover { border-color: rgba(108,99,255,.4); }
+
+        .stat-card .label {
+            font-size: .72rem;
             font-weight: 500;
-            padding: 8px 16px;
-            border-radius: 18px;
-            transition: background 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: .1em;
+            color: var(--muted);
+            margin-bottom: .5rem;
         }
 
-        .back-link:hover {
-            background-color: #e8f0fe;
-            text-decoration: underline;
+        .stat-card .value {
+            font-family: 'DM Mono', monospace;
+            font-size: 1.75rem;
+            font-weight: 500;
+            color: var(--text);
+            line-height: 1;
+            transition: color .3s;
         }
 
-        @media (max-width: 640px) {
-            .header-logo {
-                font-size: 2.5rem;
-            }
+        .stat-card.highlight .value { color: var(--accent); }
 
-            .card {
-                padding: 20px;
-            }
+        /* ── Section heading ─────────────────────────────────── */
+        .section-title {
+            font-family: 'Syne', sans-serif;
+            font-size: 1rem;
+            font-weight: 700;
+            letter-spacing: .02em;
+            color: var(--muted);
+            text-transform: uppercase;
+            margin-bottom: 1rem;
+        }
 
-            h2 {
-                font-size: 1.5rem;
-            }
+        /* ── Barrels table ───────────────────────────────────── */
+        .barrels-section { margin-bottom: 2.5rem; }
 
-            h3 {
-                font-size: 1.2rem;
-            }
+        .barrel-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: .88rem;
+        }
+
+        .barrel-table thead tr {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .barrel-table th {
+            text-align: left;
+            padding: .6rem 1rem;
+            font-size: .72rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: .1em;
+            color: var(--muted);
+        }
+
+        .barrel-table tbody tr {
+            border-bottom: 1px solid rgba(30,30,46,.7);
+            transition: background .15s;
+        }
+
+        .barrel-table tbody tr:hover { background: rgba(255,255,255,.025); }
+
+        .barrel-table td {
+            padding: .75rem 1rem;
+            color: var(--text);
+        }
+
+        .barrel-table td.mono {
+            font-family: 'DM Mono', monospace;
+            font-size: .85rem;
+        }
+
+        .barrel-name {
+            display: inline-flex;
+            align-items: center;
+            gap: .5rem;
+        }
+
+        .barrel-name::before {
+            content: '';
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--accent3);
+            flex-shrink: 0;
+        }
+
+        .no-barrels {
+            text-align: center;
+            padding: 2rem;
+            color: var(--muted);
+            font-size: .88rem;
+        }
+
+        /* Response time bar */
+        .resp-bar-wrap {
+            display: flex;
+            align-items: center;
+            gap: .6rem;
+        }
+
+        .resp-bar-bg {
+            flex: 1;
+            height: 4px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .resp-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent3), var(--accent));
+            border-radius: 4px;
+            transition: width .5s ease;
+        }
+
+        /* ── Top queries ─────────────────────────────────────── */
+        .top-queries { margin-bottom: 2.5rem; }
+
+        .query-list {
+            display: flex;
+            flex-direction: column;
+            gap: .5rem;
+        }
+
+        .query-row {
+            display: flex;
+            align-items: center;
+            gap: .75rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: .65rem 1rem;
+            transition: border-color .2s;
+        }
+
+        .query-row:hover { border-color: rgba(108,99,255,.3); }
+
+        .query-rank {
+            font-family: 'DM Mono', monospace;
+            font-size: .72rem;
+            color: var(--muted);
+            width: 1.4rem;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .query-text {
+            flex: 1;
+            font-size: .9rem;
+            font-weight: 400;
+        }
+
+        .query-count {
+            font-family: 'DM Mono', monospace;
+            font-size: .8rem;
+            color: var(--accent);
+            background: rgba(108,99,255,.12);
+            padding: .2rem .6rem;
+            border-radius: 999px;
+            flex-shrink: 0;
+        }
+
+        .query-bar-bg {
+            width: 80px;
+            height: 3px;
+            background: var(--border);
+            border-radius: 3px;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .query-bar-fill {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 3px;
+            transition: width .5s ease;
+        }
+
+        .empty-msg {
+            color: var(--muted);
+            font-size: .88rem;
+            padding: 1rem 0;
+        }
+
+        /* ── Connecting overlay ──────────────────────────────── */
+        .connecting-overlay {
+            display: flex;
+            align-items: center;
+            gap: .75rem;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1rem 1.5rem;
+            font-size: .88rem;
+            color: var(--muted);
+            margin-bottom: 2rem;
+        }
+
+        .spinner {
+            width: 18px; height: 18px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin .7s linear infinite;
+            flex-shrink: 0;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Last updated ────────────────────────────────────── */
+        .last-updated {
+            font-size: .75rem;
+            color: var(--muted);
+            font-family: 'DM Mono', monospace;
+            text-align: right;
+            margin-top: -.5rem;
+            margin-bottom: 1.5rem;
         }
     </style>
 </head>
 <body>
-<div class="container">
-    <div class="header-logo">Googo<span class="logo-dot">l</span></div>
 
-    <div class="card">
-        <h2>Estatísticas do Barrel</h2>
-        <ul>
-            <li th:each="entry : ${stats.entrySet()}">
-                <div class="stats-item">
-                    <span class="stats-label" th:text="${entry.key}"></span>
-                    <span class="stats-value" th:text="${entry.value}"></span>
-                </div>
-            </li>
-        </ul>
+<header>
+    <a class="logo" href="/">Googol</a>
+    <div class="header-right">
+        <div class="live-badge" id="live-badge">
+            <span class="live-dot"></span>
+            <span id="live-label">Connecting…</span>
+        </div>
+        <a class="back-link" href="/">← Search</a>
+    </div>
+</header>
 
-        <h3>Termos Mais Pesquisados</h3>
-        <ul>
-            <li th:each="term : ${topTerms.entrySet()}">
-                <div class="stats-item">
-                    <span class="search-term" th:text="${term.key}"></span>
-                    <span class="search-count" th:text="${term.value}"></span>
-                </div>
-            </li>
-        </ul>
+<main>
+
+    <h1>System Statistics</h1>
+    <p class="page-subtitle">Updated in real time via WebSocket &mdash; no polling required.</p>
+
+    <!-- Connecting notice (hidden once first message arrives) -->
+    <div class="connecting-overlay" id="connecting-notice">
+        <div class="spinner"></div>
+        <span>Connecting to the live stats stream…</span>
     </div>
 
-    <a href="/" class="back-link">Voltar à pesquisa</a>
-</div>
+    <!-- Last updated timestamp -->
+    <div class="last-updated" id="last-updated" style="display:none">
+        Last update: <span id="update-time">—</span>
+    </div>
+
+    <!-- Overview cards -->
+    <div class="overview-grid">
+        <div class="stat-card highlight">
+            <div class="label">Active Barrels</div>
+            <div class="value" id="stat-barrels">—</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Indexed URLs</div>
+            <div class="value" id="stat-urls">—</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Indexed Words</div>
+            <div class="value" id="stat-words">—</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Total Searches</div>
+            <div class="value" id="stat-searches">—</div>
+        </div>
+    </div>
+
+    <!-- Active Barrels -->
+    <section class="barrels-section">
+        <div class="section-title">Active Barrels</div>
+        <div id="barrels-container">
+            <p class="no-barrels">Waiting for data…</p>
+        </div>
+    </section>
+
+    <!-- Top 10 Queries -->
+    <section class="top-queries">
+        <div class="section-title">Top 10 Search Queries</div>
+        <div class="query-list" id="top-queries-container">
+            <p class="empty-msg">No search data yet.</p>
+        </div>
+    </section>
+
+</main>
+
+<script>
+    // ── WebSocket / STOMP setup ───────────────────────────────────────────
+    const liveBadge    = document.getElementById('live-badge');
+    const liveLabel    = document.getElementById('live-label');
+    const connectingEl = document.getElementById('connecting-notice');
+    const lastUpdated  = document.getElementById('last-updated');
+    const updateTime   = document.getElementById('update-time');
+
+    function connect() {
+        const socket = new SockJS('/ws');
+        const stompClient = Stomp.over(socket);
+        stompClient.debug = null; // Silence STOMP console noise
+
+        stompClient.connect({}, () => {
+            // Mark connected
+            liveBadge.classList.add('connected');
+            liveLabel.textContent = 'Live';
+
+            stompClient.subscribe('/topic/stats', msg => {
+                const data = JSON.parse(msg.body);
+                handleUpdate(data);
+            });
+        }, () => {
+            // On error — retry in 5 s
+            liveBadge.classList.remove('connected');
+            liveLabel.textContent = 'Reconnecting…';
+            setTimeout(connect, 5000);
+        });
+    }
+
+    connect();
+
+    // ── Handle incoming stats payload ─────────────────────────────────────
+    function handleUpdate(data) {
+        // Hide connecting notice on first update
+        connectingEl.style.display = 'none';
+        lastUpdated.style.display  = 'block';
+        updateTime.textContent = new Date().toLocaleTimeString();
+
+        if (!data.connected) {
+            liveLabel.textContent = 'Gateway offline';
+            liveBadge.classList.remove('connected');
+            return;
+        }
+
+        // Overview cards
+        setText('stat-barrels',  data.activeBarrels  ?? '—');
+        setText('stat-urls',     fmtNum(data.totalIndexedUrls)  ?? '—');
+        setText('stat-words',    fmtNum(data.totalIndexedWords) ?? '—');
+        setText('stat-searches', fmtNum(data.totalSearches)     ?? '—');
+
+        // Barrels table
+        renderBarrels(data.barrels || []);
+
+        // Top queries
+        renderTopQueries(data.topQueries || {});
+    }
+
+    // ── Render barrels table ──────────────────────────────────────────────
+    function renderBarrels(barrels) {
+        const container = document.getElementById('barrels-container');
+
+        if (barrels.length === 0) {
+            container.innerHTML = '<p class="no-barrels">No active barrels detected.</p>';
+            return;
+        }
+
+        // Find max response time for relative bar width
+        const maxResp = Math.max(...barrels.map(b => parseFloat(b.avgResponseTimeMs) || 0), 1);
+
+        let html = `
+            <table class="barrel-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Indexed URLs</th>
+                        <th>Indexed Words</th>
+                        <th>Avg Response</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        for (const b of barrels) {
+            const resp = parseFloat(b.avgResponseTimeMs) || 0;
+            const pct  = Math.min((resp / maxResp) * 100, 100).toFixed(1);
+            html += `
+                <tr>
+                    <td><span class="barrel-name">${escHtml(b.name ?? '—')}</span></td>
+                    <td class="mono">${fmtNum(b.indexedUrls)}</td>
+                    <td class="mono">${fmtNum(b.indexedWords)}</td>
+                    <td>
+                        <div class="resp-bar-wrap">
+                            <div class="resp-bar-bg">
+                                <div class="resp-bar-fill" style="width:${pct}%"></div>
+                            </div>
+                            <span class="mono" style="font-size:.8rem;color:var(--muted);white-space:nowrap">
+                                ${resp.toFixed(1)} ms
+                            </span>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    // ── Render top queries ────────────────────────────────────────────────
+    function renderTopQueries(topQueries) {
+        const container = document.getElementById('top-queries-container');
+        const entries   = Object.entries(topQueries);
+
+        if (entries.length === 0) {
+            container.innerHTML = '<p class="empty-msg">No searches recorded yet.</p>';
+            return;
+        }
+
+        const maxCount = entries[0][1] || 1; // Already sorted descending
+        let html = '';
+
+        entries.forEach(([term, count], i) => {
+            const pct = ((count / maxCount) * 100).toFixed(1);
+            html += `
+                <div class="query-row">
+                    <span class="query-rank">${i + 1}</span>
+                    <span class="query-text">${escHtml(term)}</span>
+                    <div class="query-bar-bg">
+                        <div class="query-bar-fill" style="width:${pct}%"></div>
+                    </div>
+                    <span class="query-count">${count}</span>
+                </div>
+            `;
+        });
+
+        container.innerHTML = html;
+    }
+
+    // ── Utilities ─────────────────────────────────────────────────────────
+    function setText(id, val) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = val;
+    }
+
+    function fmtNum(n) {
+        if (n == null) return '—';
+        return Number(n).toLocaleString();
+    }
+
+    function escHtml(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+</script>
 </body>
 </html>

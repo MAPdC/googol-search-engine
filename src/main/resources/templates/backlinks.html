@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Googol — Backlinks</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg:      #0a0a0f;
+            --surface: #111118;
+            --border:  #1e1e2e;
+            --accent:  #6c63ff;
+            --accent3: #43e97b;
+            --text:    #e8e8f0;
+            --muted:   #6b6b80;
+            --radius:  12px;
+        }
+
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'DM Sans', sans-serif;
+            min-height: 100vh;
+        }
+
+        /* ── Header ─────────────────────────────────────────── */
+        header {
+            position: sticky;
+            top: 0; z-index: 100;
+            background: rgba(10,10,15,.88);
+            backdrop-filter: blur(14px);
+            border-bottom: 1px solid var(--border);
+            padding: .85rem 2rem;
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .logo {
+            font-family: 'Syne', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 800;
+            letter-spacing: -.04em;
+            background: linear-gradient(135deg, #6c63ff, #ff6584, #43e97b);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            text-decoration: none;
+            flex-shrink: 0;
+        }
+
+        /* ── Main ────────────────────────────────────────────── */
+        main {
+            max-width: 760px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem 4rem;
+            animation: fadeUp .4s ease both;
+        }
+
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(16px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ── Target page card ────────────────────────────────── */
+        .target-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.2rem 1.4rem;
+            margin-bottom: 2rem;
+        }
+
+        .target-label {
+            font-size: .72rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: .1em;
+            color: var(--muted);
+            margin-bottom: .5rem;
+        }
+
+        .target-url {
+            font-size: .92rem;
+            color: var(--accent3);
+            word-break: break-all;
+            line-height: 1.4;
+        }
+
+        .count-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: .35rem;
+            margin-top: .75rem;
+            background: rgba(108,99,255,.12);
+            color: var(--accent);
+            border-radius: 999px;
+            padding: .25rem .75rem;
+            font-size: .8rem;
+            font-weight: 500;
+        }
+
+        /* ── Section heading ─────────────────────────────────── */
+        .section-title {
+            font-family: 'Syne', sans-serif;
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            margin-bottom: 1rem;
+        }
+
+        /* ── Backlink list ───────────────────────────────────── */
+        .backlink-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+
+        .backlink-item {
+            padding: .85rem 0;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: flex-start;
+            gap: .75rem;
+            animation: fadeUp .3s ease both;
+        }
+
+        .backlink-item:last-child { border-bottom: none; }
+
+        .bl-index {
+            font-size: .72rem;
+            color: var(--muted);
+            min-width: 1.6rem;
+            text-align: right;
+            padding-top: .15rem;
+            flex-shrink: 0;
+        }
+
+        .bl-url {
+            font-size: .9rem;
+            color: #9d9dff;
+            text-decoration: none;
+            word-break: break-all;
+            line-height: 1.4;
+            transition: color .15s;
+        }
+
+        .bl-url:hover { color: var(--text); text-decoration: underline; }
+
+        /* ── Empty state ─────────────────────────────────────── */
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+        }
+
+        .empty-icon {
+            font-size: 2.5rem;
+            margin-bottom: .75rem;
+            opacity: .4;
+        }
+
+        .empty-state h2 {
+            font-family: 'Syne', sans-serif;
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--muted);
+            margin-bottom: .5rem;
+        }
+
+        .empty-state p {
+            font-size: .88rem;
+            color: var(--muted);
+            font-weight: 300;
+        }
+
+        /* ── Nav row ─────────────────────────────────────────── */
+        .nav-row {
+            display: flex;
+            gap: .75rem;
+            margin-bottom: 1.75rem;
+        }
+
+        .nav-row a {
+            color: var(--muted);
+            text-decoration: none;
+            font-size: .88rem;
+            padding: .35rem .85rem;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            transition: color .2s, border-color .2s;
+        }
+
+        .nav-row a:hover { color: var(--text); border-color: var(--accent); }
+    </style>
+</head>
+<body>
+
+<header>
+    <a class="logo" href="/">Googol</a>
+</header>
+
+<main>
+
+    <!-- Navigation -->
+    <div class="nav-row">
+        <a th:href="${query != null and !#strings.isEmpty(query)}
+                    ? '/search?query=' + ${query}
+                    : '/'"
+           th:text="${query != null and !#strings.isEmpty(query)}
+                    ? '← Back to results for &quot;' + ${query} + '&quot;'
+                    : '← Back to search'">
+        ← Back</a>
+    </div>
+
+    <!-- Target page info -->
+    <div class="target-card">
+        <div class="target-label">Backlinks for</div>
+        <div class="target-url" th:text="${url}"></div>
+        <div class="count-badge">
+            <span>⇡</span>
+            <span th:text="${#lists.size(backlinks)} + ' inbound link' + (${#lists.size(backlinks)} != 1 ? 's' : '')"></span>
+        </div>
+    </div>
+
+    <!-- Backlinks section -->
+    <div class="section-title" th:if="${!backlinks.isEmpty()}">Pages linking here</div>
+
+    <ul class="backlink-list" th:if="${!backlinks.isEmpty()}">
+        <li class="backlink-item"
+            th:each="bl, stat : ${backlinks}"
+            th:style="'animation-delay: ' + (${stat.index} * 0.03) + 's'">
+            <span class="bl-index" th:text="${stat.count}"></span>
+            <a class="bl-url"
+               th:href="${bl}"
+               th:text="${bl}"
+               target="_blank" rel="noopener noreferrer">
+            </a>
+        </li>
+    </ul>
+
+    <!-- Empty state -->
+    <div class="empty-state" th:if="${backlinks.isEmpty()}">
+        <div class="empty-icon">⇡</div>
+        <h2>No backlinks found</h2>
+        <p>No other indexed pages link to this URL yet.<br>
+           As the crawler indexes more pages, backlinks will appear here.</p>
+    </div>
+
+</main>
+</body>
+</html>
