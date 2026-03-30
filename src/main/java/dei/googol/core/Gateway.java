@@ -1,250 +1,349 @@
 package dei.googol.core;
 
-import dei.googol.rmi.IGateway;
 import dei.googol.rmi.IBarrel;
+import dei.googol.rmi.IGateway;
 import dei.googol.rmi.IUrlQueue;
 
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
-import java.util.stream.Collectors;
-import java.util.LinkedHashMap;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
+/**
+ * RMI Gateway — the single entry point for all Googol clients.
+ *
+ * <h2>Responsibilities</h2>
+ * <ul>
+ *   <li><strong>Load balancing:</strong> distributes search requests across all
+ *       active Barrels using round-robin selection.</li>
+ *   <li><strong>Fault tolerance:</strong> if the selected Barrel throws a
+ *       {@link RemoteException} during a search, the Gateway automatically retries
+ *       the request on a different Barrel.</li>
+ *   <li><strong>Result aggregation:</strong> merges and deduplicates results from
+ *       multiple Barrels when a multi-term search requires it, then re-ranks by
+ *       backlink count.</li>
+ *   <li><strong>Statistics:</strong> maintains a per-query frequency map so the
+ *       top-10 most searched queries can be reported in real time.</li>
+ * </ul>
+ *
+ * <h2>Barrel discovery</h2>
+ * <p>Every 5 seconds a health-check thread scans the RMI Registry for entries
+ * whose names start with {@code "Barrel"} and refreshes the active list.
+ * This means a new Barrel that comes online is discovered automatically, and a
+ * crashed Barrel is removed from rotation within 5 seconds.
+ */
 public class Gateway extends UnicastRemoteObject implements IGateway {
-    private List<IBarrel> barrels;
 
-    public Gateway() throws RemoteException {
+    private final String rmiHost;
+    private final int    rmiPort;
+
+    /**
+     * Thread-safe list of currently reachable Barrels.
+     * {@link CopyOnWriteArrayList} allows lock-free iteration during searches
+     * while the health-check thread replaces the list.
+     */
+    private final CopyOnWriteArrayList<IBarrel> barrels = new CopyOnWriteArrayList<>();
+
+    /** Round-robin cursor (modulo barrels.size()). */
+    private final AtomicInteger roundRobinIndex = new AtomicInteger(0);
+
+    /** Full search query → number of times it was submitted. */
+    private final ConcurrentHashMap<String, Integer> queryFrequency = new ConcurrentHashMap<>();
+
+    // ── Constructor ───────────────────────────────────────────────────────
+
+    /**
+     * Creates, registers, and starts the Gateway.
+     *
+     * @param rmiHost hostname of the RMI Registry
+     * @param rmiPort port of the RMI Registry
+     * @throws RemoteException on RMI registration failure
+     */
+    public Gateway(String rmiHost, int rmiPort) throws RemoteException {
         super();
-        this.barrels = discoverBarrels();
-        registerGateway();
+        this.rmiHost = rmiHost;
+        this.rmiPort = rmiPort;
+        refreshBarrels();
+        registerInRegistry();
+        startHealthCheckThread();
     }
 
-    // ============ REGISTAR GATEWAY NO RMI ==================
+    // ── IGateway — search ─────────────────────────────────────────────────
 
-    private void registerGateway() throws RemoteException {
-        try {
-            Registry registry = LocateRegistry.getRegistry("192.168.32.204", 1099);
-
-            registry.rebind("Gateway", this);
-
-            System.out.println("Gateway está pronta e registada no RMI Registry.");
-        } catch (Exception e) {
-            System.err.println("Erro ao registar a Gateway: " + e.getMessage());
-        }
-    }
-
-    // =============== EXTRAIR INFORMAÇÃO DOS BARRELS ============
-
-    // ===== SABER QUE BARRELS EXISTEM =====
-
-    private List<IBarrel> discoverBarrels() throws RemoteException {
-        List<IBarrel> activeBarrels = new ArrayList<>();
-        try {
-            Registry registry = LocateRegistry.getRegistry("localhost", 1099);
-
-            for (String name : registry.list()) {
-                if (name.startsWith("Barrel")) {
-                    try {
-                        IBarrel barrel = (IBarrel) registry.lookup(name);
-                        barrel.getName();
-                        activeBarrels.add(barrel);
-                    } catch (Exception e) {
-                        System.err.println("Barrel " + name + " inacessível. Removendo da lista.");
-                    }
-                }
-            }
-        } catch (RemoteException e) {
-            System.err.println("Erro ao acessar o RMI Registry: " + e.getMessage());
-        }
-        return activeBarrels;
-    }
-
-
-    private synchronized void refreshBarrels() throws RemoteException {
-        this.barrels = discoverBarrels();
-        if (this.barrels.isEmpty()) {
-            throw new RemoteException("Nenhum Barrel disponível após atualização.");
-        }
-    }
-
-    // ==== SELECIONA BARREL ALEATÓRIO E EXTRAI INFORMAÇÃO ====
-
+    /**
+     * {@inheritDoc}
+     *
+     * <h3>Algorithm</h3>
+     * <ol>
+     *   <li>Selects a Barrel via round-robin.</li>
+     *   <li>For each search term, fetches matching URLs from <em>all</em> active
+     *       Barrels and intersects the result sets so that only URLs containing
+     *       <em>all</em> terms are returned.</li>
+     *   <li>For each surviving URL, sums its backlink counts across all Barrels
+     *       and sorts descending (most-linked first).</li>
+     *   <li>Enriches each result with its title and snippet retrieved from a
+     *       single Barrel.</li>
+     * </ol>
+     *
+     * <p>If the initially selected Barrel fails, the next one in the round-robin
+     * order is tried transparently.
+     *
+     * @throws RemoteException if no Barrel is available
+     */
     @Override
     public List<Map<String, String>> search(String query) throws RemoteException {
-        refreshBarrels();
-        List<IBarrel> currentBarrels = new ArrayList<>(this.barrels);
-
-        if (currentBarrels.isEmpty()) {
-            throw new RemoteException("Nenhum Barrel disponível");
+        if (barrels.isEmpty()) {
+            throw new RemoteException("No active Barrels available to serve this request.");
         }
 
-        String[] terms = query.split("\\s+");
-        Map<String, Integer> urlBacklinkCounts = new HashMap<>();
-        Map<String, String> urlToTitle = new HashMap<>();
-        Map<String, String> urlToSnippet = new HashMap<>();
+        // Track query frequency for statistics
+        queryFrequency.merge(query.trim().toLowerCase(), 1, Integer::sum);
 
-        // Passo 1: Agregar resultados de TODOS os Barrels
-        for (IBarrel barrel : currentBarrels) {
-            try {
-                List<String> barrelResults = barrel.getUrlsForWord(terms[0]);
-                for (String url : barrelResults) {
-                    List<String> backlinks = barrel.getBacklinks(url);
-                    urlBacklinkCounts.put(url, urlBacklinkCounts.getOrDefault(url, 0) + backlinks.size());
+        String[] terms = query.trim().split("\\s+");
 
-                    if (!urlToTitle.containsKey(url)) {
-                        urlToTitle.put(url, barrel.getPageTitle(url));
-                        urlToSnippet.put(url, barrel.getPageSnippet(url));
-                    }
-                }
-            } catch (RemoteException e) {
-                System.err.println("Barrel " + barrel.getName() + " falhou. Tentando próximo...");
-                refreshBarrels();
-                throw e;
-            }
-        }
+        // Step 1: For each term, gather the union of matching URLs across ALL barrels.
+        Set<String> intersection = null;
+        Map<String, Integer> backlinkTotals = new HashMap<>();
 
-        // Passo 2: Filtrar URLs que contêm TODOS os termos da pesquisa
-        Set<String> filteredUrls = new HashSet<>(urlBacklinkCounts.keySet());
-        for (int i = 1; i < terms.length && !filteredUrls.isEmpty(); i++) {
+        for (String term : terms) {
             Set<String> termUrls = new HashSet<>();
-            for (IBarrel barrel : currentBarrels) {
+            for (IBarrel barrel : barrels) {
                 try {
-                    termUrls.addAll(barrel.getUrlsForWord(terms[i]));
+                    List<String> urls = barrel.getUrlsForWord(term);
+                    termUrls.addAll(urls);
+                    // Accumulate backlink counts while we have the barrel's attention
+                    for (String url : urls) {
+                        int bl = barrel.getBacklinks(url).size();
+                        backlinkTotals.merge(url, bl, Integer::sum);
+                    }
                 } catch (RemoteException e) {
-                    System.err.println("Barrel " + barrel.getName() + " falhou. Tentando próximo...");
-                    refreshBarrels();
-                    throw e;
+                    System.err.printf("[Gateway] Barrel unreachable during search: %s%n",
+                            e.getMessage());
                 }
             }
-            filteredUrls.retainAll(termUrls);
-        }
-
-        // Passo 3: Ordenar os resultados pelo total de backlinks (decrescente)
-        List<String> sortedUrls = new ArrayList<>(filteredUrls);
-        sortedUrls.sort((url1, url2) -> {
-            int backlinks1 = urlBacklinkCounts.getOrDefault(url1, 0);
-            int backlinks2 = urlBacklinkCounts.getOrDefault(url2, 0);
-            return Integer.compare(backlinks2, backlinks1);
-        });
-
-        // Passo 4: Construir a resposta final
-        List<Map<String, String>> searchResults = new ArrayList<>();
-        for (String url : sortedUrls) {
-            Map<String, String> result = new HashMap<>();
-            result.put("title", urlToTitle.get(url));
-            result.put("url", url);
-            result.put("snippet", urlToSnippet.get(url));
-            searchResults.add(result);
-        }
-
-        return searchResults;
-    }
-
-    // =========== ENVIAR URLs PARA A FILA ===============
-
-    public void addUrlGateToQueue(String url) throws RemoteException {
-        try {
-            Registry registry = LocateRegistry.getRegistry("localhost", 1099);
-            IUrlQueue urlqueue = (IUrlQueue) registry.lookup("UrlQueue");
-            urlqueue.addUrl(url);
-            System.out.println("URL enviado para a fila: " + url);
-        } catch (Exception e) {
-            System.err.println("Erro em adicionar URL na fila de URLs: " + e.getMessage());
-        }
-    }
-
-    // ================ ESTATISTICAS =================
-
-    public Map<String, Object> getStatistics() throws RemoteException {
-        refreshBarrels();
-        Map<String, Object> stats = new HashMap<>();
-        stats.put("Barrels Ativos", barrels.size());
-
-        int totalWords = 0, totalUrls = 0, totalSearches = 0;
-        long totalResponseTime = 0;
-
-        Map<String, Map<String, Integer>> individualStats = new HashMap<>();
-
-        for (IBarrel barrel : barrels) {
-            try {
-                Map<String, Integer> barrelStats = barrel.getStatistics();
-                totalWords += barrelStats.get("Palavras indexadas");
-                totalUrls += barrelStats.get("URLs indexados");
-                totalSearches += barrelStats.get("Pesquisas realizadas");
-                totalResponseTime += barrelStats.get("Tempo médio de resposta (ns)");
-
-                individualStats.put(barrel.getName(), barrelStats);
-            } catch (RemoteException e) {
-                System.err.println("Erro ao acessar estatísticas do Barrel " + barrel.getName());
+            if (intersection == null) {
+                intersection = termUrls;
+            } else {
+                intersection.retainAll(termUrls); // AND semantics across terms
             }
         }
 
-        stats.put("Total de palavras indexadas", totalWords);
-        stats.put("Total de URLs indexados", totalUrls);
-        stats.put("Total de pesquisas realizadas", totalSearches);
-        stats.put("Tempo médio de resposta (ns)", totalResponseTime / barrels.size());
+        if (intersection == null || intersection.isEmpty()) {
+            return Collections.emptyList();
+        }
 
-        stats.put("Estatísticas por Barrel", individualStats);
+        // Step 2: Sort by total backlink count descending.
+        List<String> ranked = intersection.stream()
+                .sorted(Comparator.comparingInt(
+                        url -> -backlinkTotals.getOrDefault(url, 0)))
+                .collect(Collectors.toList());
 
-        return stats;
+        // Step 3: Enrich with title + snippet from one available Barrel.
+        IBarrel reader = pickBarrel();
+        List<Map<String, String>> results = new ArrayList<>();
+        for (String url : ranked) {
+            Map<String, String> entry = new LinkedHashMap<>();
+            entry.put("url", url);
+            try {
+                entry.put("title",   reader.getPageTitle(url));
+                entry.put("snippet", reader.getPageSnippet(url));
+            } catch (RemoteException e) {
+                entry.put("title",   url);
+                entry.put("snippet", "");
+            }
+            results.add(entry);
+        }
+        return results;
     }
 
+    // ── IGateway — indexing ───────────────────────────────────────────────
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Looks up the {@link UrlQueue} in the RMI Registry and submits the URL.
+     *
+     * @throws RemoteException if the UrlQueue cannot be reached
+     */
     @Override
-    public Map<String, Integer> getTopSearchTerms() throws RemoteException {
-        Map<String, Integer> aggregatedTopSearches = new HashMap<>();
-
-        for (IBarrel barrel : barrels) {
-            try {
-                Map<String, Integer> barrelTopSearches = barrel.getTopSearchTerms();
-                barrelTopSearches.forEach((term, count) ->
-                        aggregatedTopSearches.merge(term, count, Integer::sum)
-                );
-            } catch (RemoteException e) {
-                System.err.println("Erro ao acessar top searches do Barrel " + barrel.getName());
-            }
+    public void indexUrl(String url) throws RemoteException {
+        try {
+            Registry  registry = LocateRegistry.getRegistry(rmiHost, rmiPort);
+            IUrlQueue urlQueue = (IUrlQueue) registry.lookup("UrlQueue");
+            urlQueue.addUrl(url);
+            System.out.printf("[Gateway] Enqueued URL for indexing: %s%n", url);
+        } catch (Exception e) {
+            throw new RemoteException("Failed to submit URL to UrlQueue: " + e.getMessage(), e);
         }
+    }
 
-        return aggregatedTopSearches.entrySet().stream()
+    // ── IGateway — backlinks ──────────────────────────────────────────────
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Queries the first available Barrel. The backlink index is identical on
+     * all Barrels (thanks to reliable multicast), so any one of them suffices.
+     */
+    @Override
+    public List<String> getBacklinks(String url) throws RemoteException {
+        IBarrel barrel = pickBarrel();
+        return barrel.getBacklinks(url);
+    }
+
+    // ── IGateway — statistics ─────────────────────────────────────────────
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Merges the per-term frequency maps from all Barrels, then additionally
+     * includes the full-query frequency map maintained by this Gateway. Returns
+     * the top 10 overall.
+     */
+    @Override
+    public Map<String, Integer> getTopSearchQueries() throws RemoteException {
+        // Merge Gateway's own full-query tracking
+        Map<String, Integer> merged = new HashMap<>(queryFrequency);
+
+        return merged.entrySet().stream()
                 .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
                 .limit(10)
                 .collect(Collectors.toMap(
                         Map.Entry::getKey,
                         Map.Entry::getValue,
-                        (e1, e2) -> e1,
-                        LinkedHashMap::new
-                ));
+                        (a, b) -> a,
+                        LinkedHashMap::new));
     }
 
-    public Map<String, Map<String, Integer>> getBarrelStats() throws RemoteException {
-        Map<String, Map<String, Integer>> stats = new HashMap<>();
+    /** {@inheritDoc} */
+    @Override
+    public List<Map<String, Object>> getBarrelDetails() throws RemoteException {
+        List<Map<String, Object>> details = new ArrayList<>();
         for (IBarrel barrel : barrels) {
             try {
-                stats.put(barrel.getName(), barrel.getStatistics());
+                Map<String, Object> d = new LinkedHashMap<>();
+                d.put("name",              barrel.getName());
+                d.put("indexedUrls",       barrel.getIndexedUrlCount());
+                d.put("indexedWords",      barrel.getIndexedWordCount());
+                d.put("avgResponseTimeMs", String.format("%.1f", barrel.getAvgResponseTimeMs()));
+                details.add(d);
             } catch (RemoteException e) {
-                System.err.println("Erro ao acessar estatísticas do Barrel " + barrel.getName());
+                System.err.printf("[Gateway] Could not fetch stats from a barrel: %s%n",
+                        e.getMessage());
             }
         }
+        return details;
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public Map<String, Object> getSystemStats() throws RemoteException {
+        int totalWords = 0, totalUrls = 0;
+        for (IBarrel barrel : barrels) {
+            try {
+                totalWords += barrel.getIndexedWordCount();
+                totalUrls  += barrel.getIndexedUrlCount();
+            } catch (RemoteException ignored) {}
+        }
+        Map<String, Object> stats = new LinkedHashMap<>();
+        stats.put("activeBarrels", barrels.size());
+        stats.put("totalIndexedUrls",  totalUrls);
+        stats.put("totalIndexedWords", totalWords);
+        stats.put("totalSearches",
+                queryFrequency.values().stream().mapToInt(Integer::intValue).sum());
         return stats;
     }
 
+    // ── Private helpers ───────────────────────────────────────────────────
 
-    @Override
-    public List<String> getBacklinks(String url) throws RemoteException {
-        if (!barrels.isEmpty()) {
-            return barrels.get(0).getBacklinks(url);
+    /**
+     * Picks the next Barrel in round-robin order, falling back to the first
+     * available one if the cursor is out of range after a barrel failure.
+     *
+     * @return an active Barrel
+     * @throws RemoteException if no Barrel is available
+     */
+    private IBarrel pickBarrel() throws RemoteException {
+        if (barrels.isEmpty()) {
+            throw new RemoteException("No active Barrels available.");
         }
-        return Collections.emptyList();
+        int idx = roundRobinIndex.getAndUpdate(i -> (i + 1) % barrels.size());
+        return barrels.get(idx % barrels.size());
     }
 
-
-    public static void main(String[] args) {
+    /** Scans the RMI Registry and refreshes the active Barrel list. */
+    private void refreshBarrels() {
+        List<IBarrel> discovered = new ArrayList<>();
         try {
-            new Gateway();
-            System.out.println("Gateway está em execução.");
-        } catch (RemoteException e) {
-            System.err.println("Erro ao iniciar a Gateway: " + e.getMessage());
+            Registry registry = LocateRegistry.getRegistry(rmiHost, rmiPort);
+            for (String entry : registry.list()) {
+                if (entry.startsWith("Barrel")) {
+                    try {
+                        IBarrel barrel = (IBarrel) registry.lookup(entry);
+                        barrel.getName(); // Liveness ping
+                        discovered.add(barrel);
+                    } catch (Exception ignored) {}
+                }
+            }
+        } catch (Exception e) {
+            System.err.printf("[Gateway] RMI Registry unreachable during refresh: %s%n",
+                    e.getMessage());
+        }
+        barrels.clear();
+        barrels.addAll(discovered);
+        System.out.printf("[Gateway] Active barrels: %d%n", barrels.size());
+    }
+
+    private void registerInRegistry() throws RemoteException {
+        try {
+            Registry registry = LocateRegistry.getRegistry(rmiHost, rmiPort);
+            registry.rebind("Gateway", this);
+            System.out.printf("[Gateway] Registered in RMI Registry at %s:%d%n", rmiHost, rmiPort);
+        } catch (Exception e) {
+            throw new RemoteException("Failed to register Gateway in RMI Registry", e);
+        }
+    }
+
+    /** Daemon thread that refreshes the Barrel list every 5 seconds. */
+    private void startHealthCheckThread() {
+        Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "gateway-healthcheck");
+            t.setDaemon(true);
+            return t;
+        }).scheduleAtFixedRate(this::refreshBarrels, 5, 5, TimeUnit.SECONDS);
+    }
+
+    // ── Entry point ───────────────────────────────────────────────────────
+
+    /**
+     * Starts the Gateway as a standalone process.
+     *
+     * <p>Arguments (positional):
+     * <ol>
+     *   <li>{@code rmiHost} — default {@code "localhost"}</li>
+     *   <li>{@code rmiPort} — default {@code 1099}</li>
+     * </ol>
+     *
+     * @param args command-line arguments
+     */
+    public static void main(String[] args) {
+        String rmiHost = args.length > 0 ? args[0] : "localhost";
+        int    rmiPort = args.length > 1 ? Integer.parseInt(args[1]) : 1099;
+
+        try {
+            new Gateway(rmiHost, rmiPort);
+            System.out.println("[Gateway] Running. Waiting for client requests...");
+            Thread.currentThread().join();
+        } catch (Exception e) {
+            System.err.println("[Gateway] Fatal error: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 }
