@@ -8,32 +8,20 @@
         <version>3.4.5</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
+
     <groupId>dei</groupId>
     <artifactId>googol</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
-    <name>Googol_SpringBoot</name>
-    <description>Googol_SpringBoot</description>
-    <url/>
-    <licenses>
-        <license/>
-    </licenses>
-    <developers>
-        <developer/>
-    </developers>
-    <scm>
-        <connection/>
-        <developerConnection/>
-        <tag/>
-        <url/>
-    </scm>
+    <version>1.0.0</version>
+    <name>Googol Search Engine</name>
+    <description>Distributed web search engine built with Java RMI and Spring Boot</description>
+
     <properties>
         <java.version>17</java.version>
     </properties>
+
     <dependencies>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-jpa</artifactId>
-        </dependency>
+
+        <!-- Spring Boot Web MVC (Thymeleaf + embedded Tomcat) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-thymeleaf</artifactId>
@@ -43,12 +31,26 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
+        <!-- WebSocket support (STOMP over SockJS) for real-time stats -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+
+        <!-- HTML parsing for the web crawler -->
         <dependency>
             <groupId>org.jsoup</groupId>
             <artifactId>jsoup</artifactId>
             <version>1.19.1</version>
         </dependency>
 
+        <!-- JSON serialisation for WebSocket payloads -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <!-- Development utilities -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-devtools</artifactId>
@@ -60,11 +62,14 @@
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
+
+        <!-- Testing -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+
     </dependencies>
 
     <build>
