@@ -314,3 +314,14 @@ Result: every reachable Barrel always holds an identical copy of the index. A Ba
 | Barrel restart | Loads snapshot → re-registers in RMI → auto-discovered by health-check |
 | Gateway restart | `GatewayService` re-looks up the stub every 10 s automatically |
 | Downloader crash | Remaining Downloaders continue consuming the shared URL queue |
+
+---
+
+## 🚀 Roadmap & Future Enhancements
+
+While the current architecture is fully functional and fault-tolerant, there is always room for improvement. Future iterations of this project may include:
+
+- [ ] **Containerisation:** Add a `Dockerfile` and `docker-compose.yml` to spin up the entire distributed ecosystem (RMI Registry, Queue, Barrels, Downloaders, and Web Server) in isolated containers with a single command.
+- [ ] **Professional Logging:** Replace standard console outputs (`System.out`) with SLF4J and Logback for structured, level-based logging (INFO, DEBUG, ERROR) and file rotation.
+- [ ] **Continuous Integration (CI):** Set up GitHub Actions workflows to automatically compile the codebase and run checks on every push or Pull Request.
+- [ ] **Unit Testing:** Implement comprehensive JUnit/Mockito tests for core algorithmic components, such as the `BloomFilter` double-hashing logic and the `InvertedIndex` backlink ranking.
